@@ -1,9 +1,13 @@
 'use strict';
 
 let gl;                         // The webgl context.
-let surface;                    // A surface model
+let surface1;                    // A surface model
+let surface2;                    // A surface model
+let sphere;                     //user point visualization
 let shProgram;                  // A shader program
 let spaceball;                  // A SimpleRotator object that lets the user rotate the view by mouse.
+let userPointCoord;
+let userRotAngle;
 
 function deg2rad(angle) {
     return angle * Math.PI / 180;
@@ -15,7 +19,9 @@ function Model(name) {
     this.name = name;
     this.iVertexBuffer = gl.createBuffer();
     this.iNormalBuffer = gl.createBuffer();
+    this.iTextureBuffer = gl.createBuffer();
     this.count = 0;
+    this.texCount = 0;
 
     this.BufferData = function (vertices) {
 
@@ -33,16 +39,35 @@ function Model(name) {
         this.count = normals.length / 3;
     }
 
+    this.TextureBufferData = function (points) {
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iTextureBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STREAM_DRAW);
+
+        this.texCount = points.length / 2;
+    }
+
     this.Draw = function () {
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
         gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(shProgram.iAttribVertex);
+
         gl.bindBuffer(gl.ARRAY_BUFFER, this.iNormalBuffer);
         gl.vertexAttribPointer(shProgram.iAttribNormal, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(shProgram.iAttribNormal);
 
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iTextureBuffer);
+        gl.vertexAttribPointer(shProgram.iAttribTexture, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribTexture);
+
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.count);
+    }
+    this.DrawPoint = function () {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.iVertexBuffer);
+        gl.vertexAttribPointer(shProgram.iAttribVertex, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(shProgram.iAttribVertex);
+        gl.drawArrays(gl.LINE_STRIP, 0, this.count);
     }
 }
 
@@ -56,10 +81,19 @@ function ShaderProgram(name, program) {
     // Location of the attribute variable in the shader program.
     this.iAttribVertex = -1;
     this.iAttribNormal = -1;
+    this.iAttribTexture = -1;
+    // Location of the uniform specifying a color for the primitive.
+    this.iColor = -1;
     // Location of the uniform matrix representing the combined transformation.
     this.iModelViewProjectionMatrix = -1;
     this.iNormalMatrix = -1;
     this.lightPosLoc = -1;
+
+    this.iUserPoint = -1;
+    this.irotAngle = 0;
+    this.iUP = -1;
+
+    this.iTMU = -1;
 
     this.Use = function () {
         gl.useProgram(this.prog);
@@ -76,7 +110,9 @@ function draw() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     /* Set the values of the projection transformation */
-    let projection = m4.orthographic(-4, 4, -4, 4, 0, 4 * 4);
+    // let projection = m4.perspective(Math.PI / 8, 1, 8, 12);
+    let para = 3
+    let projection = m4.orthographic(-para, para, -para, para, 0, para * 4);
 
     /* Get the view matrix from the SimpleRotator object.*/
     let modelView = spaceball.getViewMatrix();
@@ -101,13 +137,239 @@ function draw() {
     gl.uniformMatrix4fv(shProgram.iNormalMatrix, false, normalmatrix);
 
     /* Draw the six faces of a cube, with different colors. */
-    gl.uniform3fv(shProgram.lightPosLoc, [5 * Math.cos(Date.now() * 0.005), 5 * Math.sin(Date.now() * 0.005), 0]);
-    surface.Draw();
-}
-function animation() {
+    gl.uniform4fv(shProgram.iColor, [0.2, 0.8, 0, 1]);
+    gl.uniform3fv(shProgram.lightPosLoc, [10 * Math.cos(Date.now() * 0.002), 10 * Math.sin(Date.now() * 0.002), 0]);
 
-    draw()
-    window.requestAnimationFrame(animation)
+    gl.uniform1i(shProgram.iTMU, 0);
+    gl.enable(gl.TEXTURE_2D);
+    gl.uniform2fv(shProgram.iUserPoint, [userPointCoord.x, userPointCoord.y]); //giving coordinates of user point
+    gl.uniform1f(shProgram.irotAngle, userRotAngle); //giving rotation angle
+
+    surface1.Draw();
+    surface2.Draw();
+    let vUP = richmond(map(userPointCoord.x,0,1,-0.9,0.9), map(userPointCoord.y,0,1,-0.9,0.9));
+    // console.log(userPointCoord);
+    // console.log(vUP);
+    gl.uniform3fv(shProgram.iUP, [vUP.x, vUP.y, vUP.z]);
+    gl.uniform1f(shProgram.irotAngle, 137.1); //giving rotation angle
+    sphere.DrawPoint();
+}
+
+/* Initialize the WebGL context. Called from init() */
+function initGL() {
+    let prog = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+
+    shProgram = new ShaderProgram('Basic', prog);
+    shProgram.Use();
+
+    shProgram.iAttribVertex = gl.getAttribLocation(prog, "vertex");
+    shProgram.iAttribNormal = gl.getAttribLocation(prog, "normal");
+    shProgram.iAttribTexture = gl.getAttribLocation(prog, "texCoord");
+    shProgram.iModelViewProjectionMatrix = gl.getUniformLocation(prog, "ModelViewProjectionMatrix");
+    shProgram.iNormalMatrix = gl.getUniformLocation(prog, "NormalMatrix");
+    shProgram.iColor = gl.getUniformLocation(prog, "color");
+    shProgram.lightPosLoc = gl.getUniformLocation(prog, "lightPos");
+    shProgram.iTMU = gl.getUniformLocation(prog, 'tmu');
+    shProgram.iUserPoint = gl.getUniformLocation(prog, 'userPoint');
+    shProgram.irotAngle = gl.getUniformLocation(prog, 'rotA');
+    shProgram.iUP = gl.getUniformLocation(prog, 'translateUP');
+
+    let vertices = CreateSurfaceData();
+    let normals = CreateSurfaceData(1);
+    let texts = CreateTexCoord();
+    surface1 = new Model('Surface1');
+    surface2 = new Model('Surface2');
+    sphere = new Model('Sphere');
+    let offset = 100
+    let verts1 = vertices.slice(0, Math.floor(vertices.length / 2) + offset - 87)
+    let norms1 = normals.slice(0, Math.floor(vertices.length / 2) + offset - 87)
+    let texts1 = texts.slice(0, Math.floor(texts.length / 2) + (2 / 3) * (offset - 87))
+    let verts2 = vertices.slice(Math.ceil(vertices.length / 2) + offset * 3 - 141)
+    let norms2 = normals.slice(Math.ceil(vertices.length / 2) + offset * 3 - 141)
+    let texts2 = texts.slice(Math.ceil(texts.length / 2) + (2 / 3) * (offset * 3 - 141))
+    for (let i = 0; i < 99; i++) {
+        verts1.pop()
+        norms1.pop()
+    }
+    for (let i = 0; i < 66; i++) {
+        texts1.pop();
+    }
+    for (let i = 0; i < 198; i++) {
+        verts2.shift()
+        norms2.shift()
+    }
+    for (let i = 0; i < 132; i++) {
+        texts2.shift();
+    }
+    surface1.BufferData(verts1);
+    surface1.NormalBufferData(norms1);
+    surface2.BufferData(verts2);
+    surface2.NormalBufferData(norms2);
+
+    // console.log(vertices.length);
+    // console.log(normals.length);
+    // console.log(CreateTexCoord().length);
+
+    LoadTexture();
+    // console.log(texts1)
+    surface1.TextureBufferData(texts1);
+    surface2.TextureBufferData(texts2);
+
+    // let translateSphere = richmond(userPointCoord.x, userPointCoord.y);
+    // sphere.BufferData([0, 0, 0, 1, 1, 1, -1, 1, -1]);
+    sphere.BufferData(CreateSphereVerts(0.1));
+
+
+    gl.enable(gl.DEPTH_TEST);
+}
+
+
+/* Creates a program for use in the WebGL context gl, and returns the
+ * identifier for that program.  If an error occurs while compiling or
+ * linking the program, an exception of type Error is thrown.  The error
+ * string contains the compilation or linking error.  If no error occurs,
+ * the program identifier is the return value of the function.
+ * The second and third parameters are strings that contain the
+ * source code for the vertex shader and for the fragment shader.
+ */
+function createProgram(gl, vShader, fShader) {
+    let vsh = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vsh, vShader);
+    gl.compileShader(vsh);
+    if (!gl.getShaderParameter(vsh, gl.COMPILE_STATUS)) {
+        throw new Error("Error in vertex shader:  " + gl.getShaderInfoLog(vsh));
+    }
+    let fsh = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fsh, fShader);
+    gl.compileShader(fsh);
+    if (!gl.getShaderParameter(fsh, gl.COMPILE_STATUS)) {
+        throw new Error("Error in fragment shader:  " + gl.getShaderInfoLog(fsh));
+    }
+    let prog = gl.createProgram();
+    gl.attachShader(prog, vsh);
+    gl.attachShader(prog, fsh);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        throw new Error("Link error in program:  " + gl.getProgramInfoLog(prog));
+    }
+    return prog;
+}
+
+
+/**
+ * initialization function that will be called when the page has loaded
+ */
+function init() {
+    userPointCoord = { x: 0.1, y: 0.1 }
+    userRotAngle = 0.0;
+    let canvas;
+    try {
+        canvas = document.querySelector('canvas');
+        gl = canvas.getContext("webgl");
+        canvas.width = 512;
+        canvas.height = 512;
+        gl.viewport(0, 0, 512, 512);
+        if (!gl) {
+            throw "Browser does not support WebGL";
+        }
+    }
+    catch (e) {
+        document.querySelector('"canvas-holder"').innerHTML =
+            "<p>Sorry, could not get a WebGL graphics context.</p>";
+        return;
+    }
+    try {
+        initGL();  // initialize the WebGL graphics context
+    }
+    catch (e) {
+        document.getElementById("canvas-holder").innerHTML =
+            "<p>Sorry, could not initialize the WebGL graphics context: " + e + "</p>";
+        return;
+    }
+
+    spaceball = new TrackballRotator(canvas, draw, 0);
+
+    // window.requestAnimationFrame(animation);
+    // draw();
+}
+
+function CreateSphereVerts(r) {
+    let vertexList = [];
+    let lon = -Math.PI;
+    let lat = -Math.PI * 0.5;
+    while (lon < Math.PI) {
+        while (lat < Math.PI * 0.5) {
+            let v1 = sphereSurf(r, lon, lat);
+            vertexList.push(v1.x, v1.y, v1.z);
+            lat += 0.05;
+        }
+        lat = -Math.PI * 0.5
+        lon += 0.05;
+    }
+    return vertexList;
+}
+
+function sphereSurf(r, u, v) {
+    let x = r * Math.sin(u) * Math.cos(v);
+    let y = r * Math.sin(u) * Math.sin(v);
+    let z = r * Math.cos(u);
+    return { x: x, y: y, z: z };
+}
+
+function dot(a, b) {
+    let c = [(a[1] * b[2] - a[2] * b[1]), (a[0] * b[2] - b[0] * a[2]), (a[0] * b[1] - a[1] * b[0])]
+    return c
+}
+function normalize(a) {
+    let d = Math.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2)
+    let n = [a[0] / d, a[1] / d, a[2] / d]
+    return n;
+}
+
+function map(val, f1, t1, f2, t2) {
+    let m;
+    m = (val - f1) * (t2 - f2) / (t1 - f1) + f2
+    return Math.min(Math.max(m, f2), t2);
+}
+
+function CreateTexCoord() {
+    let texCoordList = [];
+    let i = -1;
+    let j = -1;
+    let d = 0.1
+    let num = Math.floor(2 / d)
+    for (let k = 0; k < num - 1; k++) {
+        for (let l = 0; l < num - 1; l++) {
+            let u = map(i, -1, 1, 0, 1);
+            let v = map(j, -1, 1, 0, 1);
+            texCoordList.push(u, v);
+            u = map(i + 0.1, -1, 1, 0, 1);
+            texCoordList.push(u, v);
+            u = map(i, -1, 1, 0, 1);
+            v = map(j + 0.1, -1, 1, 0, 1);
+            texCoordList.push(u, v);
+            u = map(i + 0.1, -1, 1, 0, 1);
+            v = map(j, -1, 1, 0, 1);
+            texCoordList.push(u, v);
+            u = map(i + 0.1, -1, 1, 0, 1);
+            v = map(j + 0.1, -1, 1, 0, 1);
+            texCoordList.push(u, v);
+            u = map(i, -1, 1, 0, 1);
+            v = map(j + 0.1, -1, 1, 0, 1);
+            texCoordList.push(u, v);
+            j += d;
+        }
+        if (d > 0) {
+            j = 1;
+            d *= -1;
+        }
+        else {
+            j = -1;
+            d *= -1;
+        }
+        i += 0.1;
+    }
+    return texCoordList;
 }
 
 function CreateSurfaceData(norms = false) {
@@ -175,94 +437,6 @@ function vec3Normalize(a) {
     a[0] /= mag; a[1] /= mag; a[2] /= mag;
 }
 
-/* Initialize the WebGL context. Called from init() */
-function initGL() {
-    let prog = createProgram(gl, vertexShaderSource, fragmentShaderSource);
-
-    shProgram = new ShaderProgram('Basic', prog);
-    shProgram.Use();
-
-    shProgram.iAttribVertex = gl.getAttribLocation(prog, "vertex");
-    shProgram.iAttribNormal = gl.getAttribLocation(prog, "normal");
-    shProgram.iModelViewProjectionMatrix = gl.getUniformLocation(prog, "ModelViewProjectionMatrix");
-    shProgram.iNormalMatrix = gl.getUniformLocation(prog, "NormalMatrix");
-    shProgram.lightPosLoc = gl.getUniformLocation(prog, "lightPos");
-    surface = new Model('Surface');
-    surface.BufferData(CreateSurfaceData());
-    surface.NormalBufferData(CreateSurfaceData(1));
-
-
-    gl.enable(gl.DEPTH_TEST);
-}
-
-
-/* Creates a program for use in the WebGL context gl, and returns the
- * identifier for that program.  If an error occurs while compiling or
- * linking the program, an exception of type Error is thrown.  The error
- * string contains the compilation or linking error.  If no error occurs,
- * the program identifier is the return value of the function.
- * The second and third parameters are strings that contain the
- * source code for the vertex shader and for the fragment shader.
- */
-function createProgram(gl, vShader, fShader) {
-    let vsh = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vsh, vShader);
-    gl.compileShader(vsh);
-    if (!gl.getShaderParameter(vsh, gl.COMPILE_STATUS)) {
-        throw new Error("Error in vertex shader:  " + gl.getShaderInfoLog(vsh));
-    }
-    let fsh = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fsh, fShader);
-    gl.compileShader(fsh);
-    if (!gl.getShaderParameter(fsh, gl.COMPILE_STATUS)) {
-        throw new Error("Error in fragment shader:  " + gl.getShaderInfoLog(fsh));
-    }
-    let prog = gl.createProgram();
-    gl.attachShader(prog, vsh);
-    gl.attachShader(prog, fsh);
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-        throw new Error("Link error in program:  " + gl.getProgramInfoLog(prog));
-    }
-    return prog;
-}
-
-
-/**
- * initialization function that will be called when the page has loaded
- */
-function init() {
-    let canvas;
-    try {
-        let resolution = Math.min(window.innerHeight, window.innerWidth);
-        canvas = document.querySelector('canvas');
-        gl = canvas.getContext("webgl");
-        canvas.width = resolution;
-        canvas.height = resolution;
-        gl.viewport(0, 0, resolution, resolution);
-        if (!gl) {
-            throw "Browser does not support WebGL";
-        }
-    }
-    catch (e) {
-        document.querySelector('"canvas-holder"').innerHTML =
-            "<p>Sorry, could not get a WebGL graphics context.</p>";
-        return;
-    }
-    try {
-        initGL();  // initialize the WebGL graphics context
-    }
-    catch (e) {
-        document.getElementById("canvas-holder").innerHTML =
-            "<p>Sorry, could not initialize the WebGL graphics context: " + e + "</p>";
-        return;
-    }
-
-    spaceball = new TrackballRotator(canvas, draw, 0);
-
-    window.requestAnimationFrame(animation);
-}
-
 function mat4Transpose(a, transposed) {
     var t = 0;
     for (var i = 0; i < 4; ++i) {
@@ -312,4 +486,53 @@ function mat4Invert(m, inverse) {
     det = 1.0 / det;
     for (var i = 0; i < 16; i++) inverse[i] = inv[i] * det;
     return true;
+}
+
+function LoadTexture() {
+    let texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    
+    const image = new Image();
+    image.crossOrigin = 'anonymus';
+    image.src = "https://raw.githubusercontent.com/ArtemHrytsiuk/WebGL_Labs/CGW/texture.jpg";
+    image.onload = () => {
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            image
+        );
+        console.log("imageLoaded")
+        draw()
+    }
+}
+
+window.onkeydown = (e) => {
+    switch (e.keyCode) {
+        case 87:
+            userPointCoord.y += 0.01;
+            break;
+        case 83:
+            userPointCoord.y -= 0.01;
+            break;
+        case 65:
+            userPointCoord.x -= 0.01;
+            break;
+        case 68:
+            userPointCoord.x += 0.01;
+            break;
+    }
+    userPointCoord.x = Math.max(0.001, Math.min(userPointCoord.x, 0.999))
+    userPointCoord.y = Math.max(0.001, Math.min(userPointCoord.y, 0.999))
+    draw();
+}
+window.onmousedown = () => {
+    window.onmousemove = (e) => {
+        userRotAngle = map(e.x, 0, window.outerWidth, 0.0, Math.PI * 2);
+    }
 }
