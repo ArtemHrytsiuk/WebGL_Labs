@@ -1,5 +1,7 @@
 # PA1
 
-Project that accompanies VGGI credit module.
+Artem Hrytsiuk TP-21mp Varian 6 
 
-Visit vggi-kpi.blogspot.com for more information
+The Klein Bottle
+
+![image](/klein_bottle.jpg)
