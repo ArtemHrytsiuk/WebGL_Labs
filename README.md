@@ -1,4 +1,4 @@
-# WebGL
+# PA1
 
 Project that accompanies VGGI credit module.
 
