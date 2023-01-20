@@ -1,4 +1,4 @@
-# PA2
+# CGW
 
 Artem Hrytsiuk TP-21mp Varian 6 
 
